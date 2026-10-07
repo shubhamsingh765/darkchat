@@ -24,7 +24,7 @@ button{border:0;border-radius:10px;padding:12px 16px;font:inherit;font-weight:60
 button:hover{filter:brightness(1.1)}
 button.ghost{background:none;color:var(--dim);border:1px solid var(--line);padding:6px 12px;font-weight:400}
 .err{color:#ff8fa3;font-size:13px;min-height:18px;margin:0}
-header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header{position:relative;display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
 header .code{font-family:ui-monospace,Menlo,monospace;color:var(--acc2);letter-spacing:.2em}
 header .sp{flex:1}
 #count{color:var(--dim);font-size:13px}
@@ -42,6 +42,11 @@ header .sp{flex:1}
 #typing i:nth-child(3){animation-delay:.2s}#typing i:nth-child(4){animation-delay:.4s}
 @keyframes b{0%,60%,100%{opacity:.25;transform:none}30%{opacity:1;transform:translateY(-3px)}}
 .sys.join{color:var(--acc2);font-style:normal;background:#5eead411;border:1px solid #5eead433;border-radius:20px;padding:3px 12px}
+#count{cursor:pointer;user-select:none}
+#members{display:none;position:absolute;right:12px;top:100%;z-index:5;min-width:170px;max-height:50vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 0;box-shadow:0 10px 40px #000a}
+#members.on{display:block}
+#members div{padding:5px 16px;font-size:14px}
+#members .you{color:var(--acc2)}
 form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--panel)}
 form input{flex:1}
 </style>
@@ -65,8 +70,9 @@ form input{flex:1}
     <button class="ghost" id="leave">←</button>
     <span class="code" id="rc"></span>
     <span class="sp"></span>
-    <span id="count"><span class="dot" id="dot"></span><span id="n">1</span> here</span>
+    <span id="count" title="Who is online"><span class="dot" id="dot"></span><span id="n">1</span> here</span>
   </header>
+  <div id="members"></div>
   <div id="log"></div>
   <div id="typing"></div>
   <form id="f">
@@ -76,20 +82,28 @@ form input{flex:1}
 </section>
 
 <script>
-/* ===== CONFIG: paste your Supabase values here (Project Settings → API) ===== */
+/* ============================================================================ */
 const SUPABASE_URL = "https://jbdmwrmijwmyybmrympa.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_og0mt3cJE9tir9r4foRowQ_4XZHr89l";
 /* ============================================================================ */
 
 const $=id=>document.getElementById(id);
 const myId=Math.random().toString(36).slice(2)+Date.now().toString(36);
-let sb=null,ch=null,myName='',lastTyping=0,firstSync=true;
+let sb=null,ch=null,myName='',lastTyping=0;
 const typers={};
 function renderTyping(){
   const n=Object.values(typers).map(t=>t.name),el=$('typing');
   if(!n.length){el.textContent='';return}
   el.textContent=(n.length===1?n[0]+' is typing':n.length===2?n[0]+' and '+n[1]+' are typing':'Several people are typing');
   el.insertAdjacentHTML('beforeend','<i></i><i></i><i></i>');
+}
+function renderMembers(st){
+  const box=$('members');box.textContent='';
+  Object.entries(st||ch.presenceState()).forEach(([k,v])=>{
+    const n=names(v)[0]||'anon',d=document.createElement('div');
+    d.textContent=k===myId?n+' (you)':n;if(k===myId)d.className='you';
+    box.appendChild(d);
+  });
 }
 function stopTyper(id){if(typers[id]){clearTimeout(typers[id].to);delete typers[id];renderTyping()}}
 const clean=s=>String(s).replace(/[\u0000-\u001f\u200b-\u200f\u2028-\u202e\ufe00-\ufe0f]/g,'').trim();
@@ -114,7 +128,7 @@ async function enter(){
   if(SUPABASE_URL.startsWith('YOUR_')||SUPABASE_ANON_KEY.startsWith('YOUR_')){$('err').textContent='Site not configured: add your Supabase URL and key in the page source.';return}
   $('err').textContent='';$('go').disabled=true;$('go').textContent='Opening the door…';
   try{sb=sb||window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY)}catch(e){$('err').textContent='Could not start the connection.';reset();return}
-  myName=name;firstSync=true;
+  myName=name;
   ch=sb.channel('veil-'+code,{config:{broadcast:{self:true},presence:{key:myId}}});
   ch.on('broadcast',{event:'chat'},({payload:p})=>{
     if(!p||typeof p.text!=='string')return;
@@ -131,11 +145,7 @@ async function enter(){
   ch.on('presence',{event:'sync'},()=>{
     const st=ch.presenceState();
     $('n').textContent=Object.keys(st).length||1;
-    if(firstSync){
-      firstSync=false;
-      const others=Object.entries(st).filter(([k])=>k!==myId).flatMap(([,v])=>names(v));
-      sys(others.length?'Already here: '+others.join(', '):'You are the first one here. Share the code to invite others.','join');
-    }
+    renderMembers(st);
   });
   ch.on('presence',{event:'join'},({key,newPresences})=>{if(key===myId)return;names(newPresences).forEach(n=>sys('✦ '+n+' has entered the room','join'))});
   ch.on('presence',{event:'leave'},({key,leftPresences})=>{if(key===myId)return;stopTyper(key);names(leftPresences).forEach(n=>sys(n+' vanished'))});
@@ -158,6 +168,8 @@ function leave(){leaveCh();show('join')}
 $('go').onclick=enter;
 [$('user'),$('code')].forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter')enter()}));
 $('leave').onclick=leave;
+$('count').onclick=e=>{e.stopPropagation();$('members').classList.toggle('on')};
+document.addEventListener('click',()=>$('members').classList.remove('on'));
 $('m').addEventListener('input',()=>{
   const now=Date.now();
   if(!ch||!$('m').value.trim()||now-lastTyping<2000)return;
